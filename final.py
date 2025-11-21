@@ -248,8 +248,7 @@ while True:
     try:
         if last_update is None or (datetime.utcnow() - last_update) >= timedelta(hours=4):
             update_forebet_cache()
-            send_telegram_message("✅ Бот успешно запущен на Render!")
-
+            
         zulubet_results = parse_zulubet()
         forebet_results = forebet_cache
 

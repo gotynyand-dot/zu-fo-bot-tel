@@ -32,9 +32,12 @@ def load_forebet():
     global forebet_cache, last_forebet_update
     print("[Forebet] Обновляю данные...")
 
-    url = "https://www.forebet.com/en/football-tips"
+    url = "https://www.forebet.com/en/football-tips-and-predictions-for-today"
     try:
-        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"})
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+        }
+        response = requests.get(url, headers=headers)
         if response.status_code != 200:
             print("[Forebet] Ошибка загрузки страницы", response.status_code)
             return False
@@ -42,18 +45,29 @@ def load_forebet():
         soup = BeautifulSoup(response.text, "html.parser")
         matches = []
 
-        for row in soup.select("div.rcnt"):  # Основные карточки матчей
+        # На Forebet таблица с матчами в <table class="table-tip">
+        table = soup.find("table", {"class": "table-tip"})
+        if not table:
+            print("[Forebet] Таблица матчей не найдена")
+            return False
+
+        for row in table.find_all("tr")[1:]:  # пропускаем заголовок
+            cols = row.find_all("td")
+            if len(cols) < 5:
+                continue
+
             try:
-                teams = row.select_one("span.homeTeam").text.strip() + " - " + row.select_one("span.awayTeam").text.strip()
-                prediction = row.select_one("div.prediction div.value").text.strip()
-                probability = row.select_one("div.prob span.value").text.strip()
+                teams = cols[0].text.strip()
+                prediction = cols[1].text.strip()
+                prob_text = cols[2].text.strip()
+                prob = int(prob_text.replace("%", "")) if "%" in prob_text else 0
 
                 matches.append({
                     "teams": teams,
                     "prediction": prediction,
-                    "prob": int(probability.replace("%", ""))
+                    "prob": prob
                 })
-            except:
+            except Exception as e:
                 continue
 
         forebet_cache = matches
@@ -135,7 +149,6 @@ def loop_compare():
                         f"🟢 Zulubet: {z['prediction']} | Коэффициент: {z['odd']}"
                     )
                     bot.send_message(CHAT_ID, text)
-
             else:
                 print("[Loop] Совпадений нет.")
 
@@ -151,13 +164,11 @@ def start_command(message):
 def start_threads():
     threading.Thread(target=loop_forebet, daemon=True).start()
     threading.Thread(target=loop_compare, daemon=True).start()
-
-if __name__ == "__main__":
-    print("Бот запущен.")
-    start_threads()
-
-    # Запуск Telegram polling в отдельном потоке (Render-совместимо)
     threading.Thread(
         target=lambda: bot.infinity_polling(timeout=60, long_polling_timeout=60),
         daemon=True
     ).start()
+
+if __name__ == "__main__":
+    print("Бот запущен.")
+    start_threads()

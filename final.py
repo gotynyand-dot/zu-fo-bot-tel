@@ -1,9 +1,9 @@
-# ПОЛНАЯ ВЕРСИЯ СКРИПТА БЕЗ SELENIUM
+# ПОЛНАЯ ВЕРСИЯ СКРИПТА С CLOUDSCRAPER (без Selenium)
 # ====== БОТ ДЛЯ ZULUBET + FOREBET ======
 # Работает на Render
-# Использует requests + BeautifulSoup вместо Selenium
+# Использует cloudscraper + BeautifulSoup вместо Selenium
 
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 import time
 import datetime
@@ -26,18 +26,16 @@ forebet_cache = []
 last_forebet_update = None
 
 # ================================
-#    FOREBET ПАРСЕР (requests)
+#    FOREBET ПАРСЕР (cloudscraper)
 # ================================
 def load_forebet():
     global forebet_cache, last_forebet_update
     print("[Forebet] Обновляю данные...")
 
-    url = "https://www.forebet.com/en/football-tips-and-predictions-for-today"
+    url = "https://www.forebet.com/en/football-tips"
+    scraper = cloudscraper.create_scraper()
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        }
-        response = requests.get(url, headers=headers)
+        response = scraper.get(url)
         if response.status_code != 200:
             print("[Forebet] Ошибка загрузки страницы", response.status_code)
             return False
@@ -45,27 +43,25 @@ def load_forebet():
         soup = BeautifulSoup(response.text, "html.parser")
         matches = []
 
-        # На Forebet таблица с матчами в <table class="table-tip">
-        table = soup.find("table", {"class": "table-tip"})
-        if not table:
-            print("[Forebet] Таблица матчей не найдена")
-            return False
-
-        for row in table.find_all("tr")[1:]:  # пропускаем заголовок
-            cols = row.find_all("td")
-            if len(cols) < 5:
-                continue
-
+        # На Forebet карточки матчей находятся в div.rcnt
+        for row in soup.select("div.rcnt"):
             try:
-                teams = cols[0].text.strip()
-                prediction = cols[1].text.strip()
-                prob_text = cols[2].text.strip()
-                prob = int(prob_text.replace("%", "")) if "%" in prob_text else 0
+                home = row.select_one("span.homeTeam")
+                away = row.select_one("span.awayTeam")
+                pred = row.select_one("div.prediction div.value")
+                prob = row.select_one("div.prob span.value")
+
+                if not home or not away or not pred or not prob:
+                    continue
+
+                teams = home.text.strip() + " - " + away.text.strip()
+                prediction = pred.text.strip()
+                probability = int(prob.text.strip().replace("%", ""))
 
                 matches.append({
                     "teams": teams,
                     "prediction": prediction,
-                    "prob": prob
+                    "prob": probability
                 })
             except Exception as e:
                 continue
@@ -80,7 +76,7 @@ def load_forebet():
         return False
 
 # ===================================================
-#    ZULUBET ПАРСЕР (у тебя он уже был рабочий)
+#    ZULUBET ПАРСЕР (как было)
 # ===================================================
 def load_zulubet():
     url = "https://www.zulubet.com/tips"
@@ -133,6 +129,7 @@ def loop_forebet():
     while True:
         load_forebet()
         time.sleep(4 * 3600)  # 4 часа
+
 
 def loop_compare():
     while True:

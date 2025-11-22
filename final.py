@@ -120,7 +120,6 @@ def loop_forebet():
         load_forebet()
         time.sleep(4 * 3600)  # 4 часа
 
-
 def loop_compare():
     while True:
         if not forebet_cache:
@@ -149,13 +148,16 @@ def loop_compare():
 def start_command(message):
     bot.reply_to(message, "Бот работает на сервере Render!")
 
-
 def start_threads():
     threading.Thread(target=loop_forebet, daemon=True).start()
     threading.Thread(target=loop_compare, daemon=True).start()
 
-
 if __name__ == "__main__":
     print("Бот запущен.")
     start_threads()
-    bot.infinity_polling()
+
+    # Запуск Telegram polling в отдельном потоке (Render-совместимо)
+    threading.Thread(
+        target=lambda: bot.infinity_polling(timeout=60, long_polling_timeout=60),
+        daemon=True
+    ).start()

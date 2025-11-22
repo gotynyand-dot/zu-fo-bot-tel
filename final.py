@@ -1,22 +1,24 @@
-# ПОЛНАЯ ВЕРСИЯ СКРИПТА С CLOUDSCRAPER (без Selenium)
-# ====== БОТ ДЛЯ ZULUBET + FOREBET ======
+# ====== БОТ ДЛЯ ZULUBET + FOREBET С SELENIUM ======
 # Работает на Render
-# Использует cloudscraper + BeautifulSoup вместо Selenium
+# Selenium + Chrome (headless)
 
-import cloudscraper
-from bs4 import BeautifulSoup
+import os
 import time
 import datetime
-import telebot
 import threading
-import os
+import telebot
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+import chromedriver_autoinstaller
+import requests
+from bs4 import BeautifulSoup
 
 # ====================
 #    НАСТРОЙКИ БОТА
 # ====================
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = int(os.getenv("CHAT_ID", "0"))
-
 bot = telebot.TeleBot(TOKEN)
 
 # ====================
@@ -26,49 +28,49 @@ forebet_cache = []
 last_forebet_update = None
 
 # ================================
-#    FOREBET ПАРСЕР (cloudscraper)
+#    FOREBET ПАРСЕР (Selenium)
 # ================================
 def load_forebet():
     global forebet_cache, last_forebet_update
     print("[Forebet] Обновляю данные...")
 
-    url = "https://www.forebet.com/en/football-tips"
-    scraper = cloudscraper.create_scraper()
     try:
-        response = scraper.get(url)
-        if response.status_code != 200:
-            print("[Forebet] Ошибка загрузки страницы", response.status_code)
-            return False
+        chromedriver_autoinstaller.install()
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        options = Options()
+        options.add_argument("--headless")
+        options.add_argument("--no-sandbox")
+        options.add_argument("--disable-dev-shm-usage")
+        options.add_argument("--disable-gpu")
+        options.add_argument("--window-size=1920,1080")
+        options.add_argument("--ignore-certificate-errors")
+
+        driver = webdriver.Chrome(options=options)
+        driver.get("https://www.forebet.com/en/football-tips")
+
+        time.sleep(3)  # подождать загрузку страницы
+
         matches = []
-
-        # На Forebet карточки матчей находятся в div.rcnt
-        for row in soup.select("div.rcnt"):
+        rows = driver.find_elements(By.CSS_SELECTOR, "div.rcnt")
+        for row in rows:
             try:
-                home = row.select_one("span.homeTeam")
-                away = row.select_one("span.awayTeam")
-                pred = row.select_one("div.prediction div.value")
-                prob = row.select_one("div.prob span.value")
-
-                if not home or not away or not pred or not prob:
-                    continue
-
-                teams = home.text.strip() + " - " + away.text.strip()
-                prediction = pred.text.strip()
-                probability = int(prob.text.strip().replace("%", ""))
-
+                teams = row.find_element(By.CSS_SELECTOR, "span.homeTeam").text.strip() + " - " + \
+                        row.find_element(By.CSS_SELECTOR, "span.awayTeam").text.strip()
+                prediction = row.find_element(By.CSS_SELECTOR, "div.prediction div.value").text.strip()
+                probability = row.find_element(By.CSS_SELECTOR, "div.prob span.value").text.strip()
                 matches.append({
                     "teams": teams,
                     "prediction": prediction,
-                    "prob": probability
+                    "prob": int(probability.replace("%", ""))
                 })
-            except Exception as e:
+            except:
                 continue
 
         forebet_cache = matches
         last_forebet_update = datetime.datetime.utcnow()
         print(f"[Forebet] Загружено матчей: {len(matches)}")
+
+        driver.quit()
         return True
 
     except Exception as e:
@@ -76,7 +78,7 @@ def load_forebet():
         return False
 
 # ===================================================
-#    ZULUBET ПАРСЕР (как было)
+#    ZULUBET ПАРСЕР (requests)
 # ===================================================
 def load_zulubet():
     url = "https://www.zulubet.com/tips"
@@ -130,7 +132,6 @@ def loop_forebet():
         load_forebet()
         time.sleep(4 * 3600)  # 4 часа
 
-
 def loop_compare():
     while True:
         if not forebet_cache:
@@ -169,3 +170,4 @@ def start_threads():
 if __name__ == "__main__":
     print("Бот запущен.")
     start_threads()
+    bot.infinity_polling()

@@ -138,7 +138,7 @@ def fetch_forebet_via_playwright():
 
     try:
         with sync_playwright() as pw:
-            browser = pw.chromium.launch(headless=True)
+            browser = pw.firefox.launch(headless=True)
             page = browser.new_page()
             for url in urls:
                 try:

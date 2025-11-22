@@ -20,7 +20,7 @@ from bs4 import BeautifulSoup
 # ===============================
 TOKEN = os.environ.get("TG_BOT_TOKEN") or "8353200396:AAEYPs8RmdEUfsK6lG1U3kve3fjL-oAIR3I"
 CHAT_ID = int(os.environ.get("TG_CHAT_ID") or "293637253")
-SCRAPE_DO_API_KEY = os.environ.get("SCRAPE_DO_API_KEY") or "твой_ключ_Scrape_do"
+SCRAPE_DO_API_KEY = os.environ.get("SCRAPE_DO_API_KEY") or "83fd56a86b214950b688fa0adbf06682ee7310b61e2"
 
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"

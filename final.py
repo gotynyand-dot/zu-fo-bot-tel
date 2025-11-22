@@ -2,28 +2,25 @@
 # coding: utf-8
 """
 final.py
-Playwright-версия парсера Forebet + Zulubet + Telegram отправка.
-Заменена только часть, связанная с Selenium -> Playwright.
+Парсер Zulubet + Forebet через Scrape.do + отправка в Telegram.
+Forebet парсится через Scrape.do (HTTP запрос + HTML), без Selenium/Playwright.
 """
+
+import os
+import re
+import time
+import traceback
+from datetime import datetime, timedelta
 
 import requests
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
-import re
-import time
-import os
-import sys
-import traceback
-
-# Playwright
-from playwright.sync_api import sync_playwright
 
 # ===============================
-# 🔹 Настройки Telegram (через env переменные — безопасно)
+# 🔹 Настройки Telegram и Scrape.do
 # ===============================
-# Рекомендую настроить эти переменные в Render (Dashboard -> Environment)
 TOKEN = os.environ.get("TG_BOT_TOKEN") or "8353200396:AAEYPs8RmdEUfsK6lG1U3kve3fjL-oAIR3I"
 CHAT_ID = int(os.environ.get("TG_CHAT_ID") or "293637253")
+SCRAPE_DO_API_KEY = os.environ.get("SCRAPE_DO_API_KEY") or "твой_ключ_Scrape_do"
 
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -39,28 +36,26 @@ def send_telegram_message(text):
 # 🔹 Вспомогательные функции
 # ===============================
 def normalize_team_name(name: str):
-    """Очищает название команды и убирает служебные слова"""
     name = re.sub(r'[^a-zA-Z0-9\s\-]', '', str(name)).lower()
     words = name.split()
     ignore = {
-        'town', 'city', 'county', 'borough', 'united', 'district', 'state',
-        'fc', 'afc', 'cf', 'sc', 'ac', 'bc', 'rc', 'cd', 'sd', 'ud',
-        'fk', 'nk', 'ks',
-        'u17', 'u18', 'u19', 'u20', 'u21', 'u23',
-        'b', 'ii', 'reserve', 'reserves',
-        'club', 'team', 'sporting',
-        'sv', 'tsv', 'vfb', 'vfl', 'sg', 'spvgg'
+        'town','city','county','borough','united','district','state',
+        'fc','afc','cf','sc','ac','bc','rc','cd','sd','ud',
+        'fk','nk','ks',
+        'u17','u18','u19','u20','u21','u23',
+        'b','ii','reserve','reserves',
+        'club','team','sporting',
+        'sv','tsv','vfb','vfl','sg','spvgg'
     }
     return [w for w in words if w not in ignore and len(w) > 2]
 
 def teams_match(z_team: str, f_team: str) -> bool:
-    """Проверяет, есть ли совпадение по хотя бы одному слову"""
     z_words = normalize_team_name(z_team)
     f_words = normalize_team_name(f_team)
     return any(zw in f_words for zw in z_words)
 
 # ===============================
-# 🔹 Парсинг Zulubet (оставил как было)
+# 🔹 Парсинг Zulubet
 # ===============================
 def parse_zulubet():
     url = "https://www.zulubet.com/"
@@ -88,9 +83,7 @@ def parse_zulubet():
 
             script_tag = cells[0].find("script")
             raw_time = (
-                script_tag.string.strip()
-                .replace("mf_usertime('", "")
-                .replace("');", "")
+                script_tag.string.strip().replace("mf_usertime('","").replace("');","")
                 if script_tag else "?"
             )
 
@@ -103,7 +96,7 @@ def parse_zulubet():
             match = cells[1].find("a").text.strip()
 
             def extract_percent(text):
-                return int(text.split(":")[1].replace("%", "").strip())
+                return int(text.split(":")[1].replace("%","").strip())
 
             p1 = extract_percent(cells[3].text)
             px = extract_percent(cells[4].text)
@@ -119,124 +112,54 @@ def parse_zulubet():
                     "away": away,
                     "text": f"{time_str} ⚽️ {match}  {p1}-{px}-{p2}"
                 })
-
         except Exception as e:
             print("Ошибка в Zulubet:", e)
 
     return results
 
 # ===============================
-# 🔹 Парсер Forebet (Playwright)
+# 🔹 Парсинг Forebet через Scrape.do
 # ===============================
-def fetch_forebet_via_playwright():
-    results = []
-
-    urls = [
-        "https://www.forebet.com/en/football-tips-and-predictions-for-today",
-        "https://www.forebet.com/en/football-tips-and-predictions-for-tomorrow"
-    ]
-
+def fetch_forebet_via_scrape_do(page="today"):
+    url = f"https://www.forebet.com/en/football-tips-and-predictions-for-{page}"
+    api_url = f"https://api.scrape.do/?token={SCRAPE_DO_API_KEY}&url={url}&render=true"
     try:
-        with sync_playwright() as pw:
-            browser = pw.firefox.launch(headless=True)
-            page = browser.new_page()
-            for url in urls:
-                try:
-                    print(f"\n===== Парсинг сайта: {url} =====\n")
-                    page.goto(url, timeout=60000, wait_until="domcontentloaded")
-                except Exception as e:
-                    print("Ошибка загрузки страницы Forebet:", e)
-                    continue
-
-                # Закрываем cookies если есть (адаптируй селектор при необходимости)
-                try:
-                    # разные сайты могут иметь разные селекторы; пробуем несколько
-                    page.click(".fc-button.fc-cta-consent", timeout=3000)
-                    print("Нажал 'Соглашаюсь' (селектор .fc-button.fc-cta-consent)")
-                except:
-                    try:
-                        page.click(".fc-button-label", timeout=3000)
-                        print("Нажал 'Соглашаюсь' (селектор .fc-button-label)")
-                    except:
-                        print("Кнопка 'Соглашаюсь' не найдена.")
-
-                # Жмём кнопку More, если есть
-                try:
-                    page.click("xpath=//span[contains(@onclick, 'ltodrows')]", timeout=4000)
-                    page.wait_for_timeout(3000)
-                except:
-                    print("Кнопка MORE не найдена или не кликабельна.")
-
-                rows = page.locator(".rcnt")
-                try:
-                    count = rows.count()
-                except Exception:
-                    count = 0
-                print(f"Найдено матчей: {count}")
-
-                for i in range(count):
-                    try:
-                        row = rows.nth(i)
-                        try:
-                            date = row.locator("time .date_bah").inner_text().strip()
-                        except:
-                            date = ""
-
-                        try:
-                            home = row.locator(".homeTeam span").inner_text().strip()
-                            away = row.locator(".awayTeam span").inner_text().strip()
-                        except:
-                            # если не смогли получить команды — пропускаем
-                            continue
-
-                        probs = row.locator(".fprc span")
-                        def get_prob(j):
-                            try:
-                                return probs.nth(j).inner_text().strip()
-                            except:
-                                return ""
-
-                        prob1 = get_prob(0)
-                        probX = get_prob(1)
-                        prob2 = get_prob(2)
-
-                        try:
-                            ex_score = row.locator(".ex_sc").inner_text().strip()
-                        except:
-                            ex_score = ""
-
-                        def to_int_percent(s):
-                            s = str(s).replace("%", "").strip()
-                            try:
-                                return int(s) if s != '' else 0
-                            except:
-                                return 0
-
-                        results.append({
-                            "time": date,
-                            "home": home,
-                            "away": away,
-                            "p1": to_int_percent(prob1),
-                            "px": to_int_percent(probX),
-                            "p2": to_int_percent(prob2),
-                            "score": ex_score
-                        })
-
-                    except Exception:
-                        # не останавливаем парсер из-за одного row
-                        continue
-
-            browser.close()
-
+        r = requests.get(api_url, timeout=30)
+        if r.status_code != 200:
+            print("Scrape.do вернул статус:", r.status_code)
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
     except Exception as e:
-        print("Ошибка парсинга Forebet (playwright):", e)
-        traceback.print_exc()
+        print("Ошибка Scrape.do:", e)
+        return []
 
-    print(f"✔ Forebet собрано матчей: {len(results)}")
+    results = []
+    rows = soup.select(".rcnt")
+    for row in rows:
+        try:
+            home = row.select_one(".homeTeam span").text.strip()
+            away = row.select_one(".awayTeam span").text.strip()
+            probs = row.select(".fprc span")
+            p1 = int(probs[0].text.replace("%",""))
+            px = int(probs[1].text.replace("%",""))
+            p2 = int(probs[2].text.replace("%",""))
+            ex_score = row.select_one(".ex_sc").text.strip() if row.select_one(".ex_sc") else ""
+            date = row.select_one("time .date_bah").text.strip() if row.select_one("time .date_bah") else ""
+            results.append({
+                "time": date,
+                "home": home,
+                "away": away,
+                "p1": p1,
+                "px": px,
+                "p2": p2,
+                "score": ex_score
+            })
+        except:
+            continue
     return results
 
 # ===============================
-# 🔹 In-memory cache для Forebet
+# 🔹 In-memory cache
 # ===============================
 forebet_cache = []
 last_update = None
@@ -246,8 +169,8 @@ def update_forebet_cache(force=False):
     now = datetime.utcnow()
     if not force and last_update is not None and (now - last_update) < timedelta(hours=4):
         return False
-    print("Обновляю Forebet (Playwright)...")
-    items = fetch_forebet_via_playwright()
+    print("Обновляю Forebet (Scrape.do)...")
+    items = fetch_forebet_via_scrape_do("today") + fetch_forebet_via_scrape_do("tomorrow")
     if items:
         forebet_cache = items
         last_update = datetime.utcnow()
@@ -272,13 +195,13 @@ def main_loop():
             zulubet_results = parse_zulubet()
             forebet_results = forebet_cache
 
-            # 🔹 фильтр по вероятности ≥ 60
+            # фильтр по вероятности ≥ 60
             forebet_results_filtered = [
                 f for f in forebet_results if f.get('p1',0) >= 60 or f.get('px',0) >= 60 or f.get('p2',0) >= 60
             ]
 
-            print(f"Zulubet: найдено {len(zulubet_results)} подходящих матчей (по порогу).")
-            print(f"Forebet после фильтрации по вероятности ≥60: {len(forebet_results_filtered)} матчей")
+            print(f"Zulubet: найдено {len(zulubet_results)} матчей")
+            print(f"Forebet после фильтрации ≥60%: {len(forebet_results_filtered)} матчей")
 
             combined_matches = []
 
@@ -298,7 +221,7 @@ def main_loop():
                         )
                     if f1_matches and f2_matches:
                         combined_matches.append("🔥 Полное совпадение по обеим командам!")
-                    combined_matches.append("")  # разделитель между блоками
+                    combined_matches.append("")
 
             if combined_matches:
                 final_message = "\n".join(combined_matches)
@@ -308,20 +231,17 @@ def main_loop():
                 print("— Совпадений нет.")
 
         except Exception as e:
-            print("ОШИБКА В ОСНОВНОМ ЦИКЛЕ:", e)
+            print("Ошибка в основном цикле:", e)
             traceback.print_exc()
 
         print("\nОжидание 30 минут...\n")
         time.sleep(1800)
-
 
 if __name__ == "__main__":
     try:
         main_loop()
     except KeyboardInterrupt:
         print("Завершение по Ctrl+C")
-        sys.exit(0)
     except Exception as e:
-        print("Критическая ошибка, выхожу.", e)
+        print("Критическая ошибка:", e)
         traceback.print_exc()
-        sys.exit(1)

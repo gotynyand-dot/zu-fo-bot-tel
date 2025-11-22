@@ -1,7 +1,3 @@
-selenium
-chromedriver-autoinstaller
 requests
 beautifulsoup4
-lxml
-pyTelegramBotAPI
-cloudscraper
+playwright

@@ -32,6 +32,7 @@ def send_telegram_message(text):
     except Exception as e:
         print("Ошибка HTTP при отправке в Telegram:", e)
 
+
 # ===============================
 # 🔹 Вспомогательные функции
 # ===============================
@@ -53,6 +54,7 @@ def teams_match(z_team: str, f_team: str) -> bool:
     z_words = normalize_team_name(z_team)
     f_words = normalize_team_name(f_team)
     return any(zw in f_words for zw in z_words)
+
 
 # ===============================
 # 🔹 Парсинг Zulubet
@@ -117,6 +119,7 @@ def parse_zulubet():
 
     return results
 
+
 # ===============================
 # 🔹 Парсинг Forebet через Scrape.do
 # ===============================
@@ -158,50 +161,54 @@ def fetch_forebet_via_scrape_do(page="today"):
             continue
     return results
 
+
 # ===============================
-# 🔹 In-memory cache
+# 🔹 In-memory cache Forebet (30 min)
 # ===============================
 forebet_cache = []
 last_update = None
+FOREBET_UPDATE_INTERVAL = timedelta(minutes=30)
 
 def update_forebet_cache(force=False):
     global forebet_cache, last_update
     now = datetime.utcnow()
-    if not force and last_update is not None and (now - last_update) < timedelta(hours=4):
+
+    if not force and last_update is not None and (now - last_update) < FOREBET_UPDATE_INTERVAL:
         return False
+
     print("Обновляю Forebet (Scrape.do)...")
     items = fetch_forebet_via_scrape_do("today") + fetch_forebet_via_scrape_do("tomorrow")
+
     if items:
         forebet_cache = items
         last_update = datetime.utcnow()
         print(f"Кеш Forebet обновлён: {len(items)} матчей (время {last_update})")
         return True
     else:
-        print("Forebet-парсер вернул 0 матчей — кеш не обновлён.")
+        print("Forebet-парсер вернул 0 матчей — кеш НЕ обновлён.")
         return False
+
 
 # ===============================
 # 🔁 Основной цикл
 # ===============================
 def main_loop():
-    print("Скрипт запущен. Forebet обновляется каждые 4 часа; сравнение — каждые 30 минут.\n")
+    print("Скрипт запущен. Forebet обновляется каждые 30 минут; сравнение — каждые 30 минут.\n")
     update_forebet_cache(force=True)
 
     while True:
         try:
-            if last_update is None or (datetime.utcnow() - last_update) >= timedelta(hours=4):
-                update_forebet_cache()
+            update_forebet_cache()  # теперь проверяется каждые 30 минут автоматически
 
             zulubet_results = parse_zulubet()
             forebet_results = forebet_cache
 
-            # фильтр по вероятности ≥ 60
             forebet_results_filtered = [
                 f for f in forebet_results if f.get('p1',0) >= 60 or f.get('px',0) >= 60 or f.get('p2',0) >= 60
             ]
 
             print(f"Zulubet: найдено {len(zulubet_results)} матчей")
-            print(f"Forebet после фильтрации ≥60%: {len(forebet_results_filtered)} матчей")
+            print(f"Forebet ≥60%: {len(forebet_results_filtered)} матчей")
 
             combined_matches = []
 
@@ -224,8 +231,7 @@ def main_loop():
                     combined_matches.append("")
 
             if combined_matches:
-                final_message = "\n".join(combined_matches)
-                send_telegram_message(final_message)
+                send_telegram_message("\n".join(combined_matches))
                 print("✅ Совпадения найдены и отправлены.")
             else:
                 print("— Совпадений нет.")
@@ -236,6 +242,7 @@ def main_loop():
 
         print("\nОжидание 30 минут...\n")
         time.sleep(1800)
+
 
 if __name__ == "__main__":
     try:

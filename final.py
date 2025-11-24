@@ -1,8 +1,9 @@
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import requests as rq
 from bs4 import BeautifulSoup
+from curl_cffi import requests as curl_requests
 
 # ===============================
 # 🔹 Настройки Telegram
@@ -85,7 +86,10 @@ def parse_zulubet():
             except:
                 time_str = raw_time
 
-            match = cells[1].find("a").text.strip()
+            link = cells[1].find("a")
+            if not link:
+                continue
+            match = link.text.strip()
 
             def extract_percent(text):
                 return int(text.split(":")[1].replace("%", "").strip())
@@ -113,7 +117,6 @@ def parse_zulubet():
 # ===============================
 # 🔹 Новый парсер Forebet (API + BeautifulSoup)
 # ===============================
-from curl_cffi import requests as curl_requests
 forebet_cache = []
 last_update = None
 
@@ -128,19 +131,12 @@ def fetch_forebet():
 
     for desc, main_url in urls:
         try:
-            # Получаем HTML для предполагаемых счетов и коэффициентов
             resp_main = session.get(main_url, impersonate="chrome110", timeout=20)
             resp_main.raise_for_status()
             soup = BeautifulSoup(resp_main.text, "html.parser")
 
-            # API URL
             api_url = "https://www.forebet.com/scripts/getrs.php"
-
-            if desc == "today":
-                date_str = datetime.now().strftime("%Y-%m-%d")
-            else:
-                date_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-
+            date_str = datetime.now().strftime("%Y-%m-%d") if desc == "today" else (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
             params = {
                 "ln": "en",
                 "tp": "1x2",
@@ -160,7 +156,6 @@ def fetch_forebet():
                 continue
 
             matches = json_data[0]
-
             score_divs = soup.find_all("div", class_="ex_sc tabonly")
 
             for i, match in enumerate(matches):
@@ -197,14 +192,14 @@ def fetch_forebet():
 
 def update_forebet_cache(force=False):
     global forebet_cache, last_update
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if not force and last_update is not None and (now - last_update) < timedelta(hours=4):
         return False
     print("Обновляю Forebet (новый парсер)...")
     items = fetch_forebet()
     if items:
         forebet_cache = items
-        last_update = datetime.utcnow()
+        last_update = datetime.now(timezone.utc)
         print(f"Кеш Forebet обновлён: {len(items)} матчей (время {last_update})")
         return True
     else:
@@ -219,7 +214,7 @@ update_forebet_cache(force=True)
 
 while True:
     try:
-        if last_update is None or (datetime.utcnow() - last_update) >= timedelta(hours=4):
+        if last_update is None or (datetime.now(timezone.utc) - last_update) >= timedelta(hours=4):
             update_forebet_cache()
 
         zulubet_results = parse_zulubet()

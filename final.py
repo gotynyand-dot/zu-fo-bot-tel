@@ -1,6 +1,6 @@
 import re
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 import requests as rq
 from bs4 import BeautifulSoup
 from curl_cffi import requests as curl_requests
@@ -15,7 +15,8 @@ def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
     try:
-        response = rq.post(url, data=payload, timeout=20)
+        response = rq.post(url, data=payload, timeout=30)
+        print("Telegram status:", response.status_code, response.text)
         if not response.ok:
             print("Ошибка при отправке в Telegram:", response.text)
     except Exception as e:
@@ -25,7 +26,6 @@ def send_telegram_message(text):
 # 🔹 Вспомогательные функции
 # ===============================
 def normalize_team_name(name: str):
-    """Очищает название команды и убирает служебные слова"""
     name = re.sub(r'[^a-zA-Z0-9\s\-]', '', str(name)).lower()
     words = name.split()
     ignore = {
@@ -40,7 +40,6 @@ def normalize_team_name(name: str):
     return [w for w in words if w not in ignore and len(w) > 2]
 
 def teams_match(z_team: str, f_team: str) -> bool:
-    """Проверяет, есть ли совпадение по хотя бы одному слову"""
     z_words = normalize_team_name(z_team)
     f_words = normalize_team_name(f_team)
     return any(zw in f_words for zw in z_words)
@@ -86,10 +85,8 @@ def parse_zulubet():
             except:
                 time_str = raw_time
 
-            link = cells[1].find("a")
-            if not link:
-                continue
-            match = link.text.strip()
+            a_tag = cells[1].find("a")
+            match = a_tag.text.strip() if a_tag else "N/A"
 
             def extract_percent(text):
                 return int(text.split(":")[1].replace("%", "").strip())
@@ -136,17 +133,13 @@ def fetch_forebet():
             soup = BeautifulSoup(resp_main.text, "html.parser")
 
             api_url = "https://www.forebet.com/scripts/getrs.php"
-            date_str = datetime.now().strftime("%Y-%m-%d") if desc == "today" else (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
-            params = {
-                "ln": "en",
-                "tp": "1x2",
-                "in": date_str,
-                "ord": "0",
-                "tz": "+60",
-                "tzs": "0",
-                "tze": "0"
-            }
 
+            if desc == "today":
+                date_str = datetime.now().strftime("%Y-%m-%d")
+            else:
+                date_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+
+            params = {"ln": "en", "tp": "1x2", "in": date_str, "ord": "0", "tz": "+60", "tzs": "0", "tze": "0"}
             resp_api = session.get(api_url, params=params, impersonate="chrome110", timeout=20)
             resp_api.raise_for_status()
             json_data = resp_api.json()
@@ -192,14 +185,14 @@ def fetch_forebet():
 
 def update_forebet_cache(force=False):
     global forebet_cache, last_update
-    now = datetime.now(timezone.utc)
+    now = datetime.utcnow()
     if not force and last_update is not None and (now - last_update) < timedelta(hours=4):
         return False
     print("Обновляю Forebet (новый парсер)...")
     items = fetch_forebet()
     if items:
         forebet_cache = items
-        last_update = datetime.now(timezone.utc)
+        last_update = datetime.utcnow()
         print(f"Кеш Forebet обновлён: {len(items)} матчей (время {last_update})")
         return True
     else:
@@ -209,12 +202,17 @@ def update_forebet_cache(force=False):
 # ===============================
 # 🔁 Основной цикл
 # ===============================
+
 print("Скрипт запущен. Forebet обновляется каждые 4 часа; сравнение — каждые 30 минут.\n")
+
+# 🔹 Тестовая проверка Telegram при старте
+send_telegram_message("✅ Скрипт успешно запущен на Render. Telegram работает!")
+
 update_forebet_cache(force=True)
 
 while True:
     try:
-        if last_update is None or (datetime.now(timezone.utc) - last_update) >= timedelta(hours=4):
+        if last_update is None or (datetime.utcnow() - last_update) >= timedelta(hours=4):
             update_forebet_cache()
 
         zulubet_results = parse_zulubet()
@@ -227,6 +225,9 @@ while True:
 
         print(f"Zulubet: найдено {len(zulubet_results)} подходящих матчей (по порогу).")
         print(f"Forebet после фильтрации по вероятности ≥60: {len(forebet_results_filtered)} матчей")
+
+        # 🔹 Логирование команд для отладки
+        print("DEBUG: Zulubet команды:", [(z["home"], z["away"]) for z in zulubet_results])
 
         combined_matches = []
 
@@ -260,4 +261,3 @@ while True:
 
     print("\nОжидание 30 минут...\n")
     time.sleep(1800)
-

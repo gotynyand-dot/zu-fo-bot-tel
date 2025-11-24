@@ -1,14 +1,21 @@
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import os
 import requests as rq
 from bs4 import BeautifulSoup
+from curl_cffi import requests as curl_requests  # Forebet parser
 
 # ===============================
-# 🔹 Настройки Telegram
+# 🔹 Настройки Telegram через ENV
 # ===============================
-TOKEN = "8353200396:AAEYPs8RmdEUfsK6lG1U3kve3fjL-oAIR3I"
-CHAT_ID = 293637253
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+if not TOKEN or not CHAT_ID:
+    raise ValueError("Пожалуйста, установите TELEGRAM_TOKEN и TELEGRAM_CHAT_ID")
+
+CHAT_ID = int(CHAT_ID)
 
 def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
@@ -24,7 +31,6 @@ def send_telegram_message(text):
 # 🔹 Вспомогательные функции
 # ===============================
 def normalize_team_name(name: str):
-    """Очищает название команды и убирает служебные слова"""
     name = re.sub(r'[^a-zA-Z0-9\s\-]', '', str(name)).lower()
     words = name.split()
     ignore = {
@@ -39,7 +45,6 @@ def normalize_team_name(name: str):
     return [w for w in words if w not in ignore and len(w) > 2]
 
 def teams_match(z_team: str, f_team: str) -> bool:
-    """Проверяет, есть ли совпадение по хотя бы одному слову"""
     z_words = normalize_team_name(z_team)
     f_words = normalize_team_name(f_team)
     return any(zw in f_words for zw in z_words)
@@ -111,9 +116,8 @@ def parse_zulubet():
     return results
 
 # ===============================
-# 🔹 Новый парсер Forebet (API + BeautifulSoup)
+# 🔹 Парсер Forebet
 # ===============================
-from curl_cffi import requests as curl_requests
 forebet_cache = []
 last_update = None
 
@@ -128,18 +132,16 @@ def fetch_forebet():
 
     for desc, main_url in urls:
         try:
-            # Получаем HTML для предполагаемых счетов и коэффициентов
             resp_main = session.get(main_url, impersonate="chrome110", timeout=20)
             resp_main.raise_for_status()
             soup = BeautifulSoup(resp_main.text, "html.parser")
 
-            # API URL
             api_url = "https://www.forebet.com/scripts/getrs.php"
-
+            date_str = datetime.now(timezone.utc)
             if desc == "today":
-                date_str = datetime.now().strftime("%Y-%m-%d")
+                date_str = date_str.strftime("%Y-%m-%d")
             else:
-                date_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+                date_str = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
 
             params = {
                 "ln": "en",
@@ -160,7 +162,6 @@ def fetch_forebet():
                 continue
 
             matches = json_data[0]
-
             score_divs = soup.find_all("div", class_="ex_sc tabonly")
 
             for i, match in enumerate(matches):
@@ -197,14 +198,14 @@ def fetch_forebet():
 
 def update_forebet_cache(force=False):
     global forebet_cache, last_update
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     if not force and last_update is not None and (now - last_update) < timedelta(hours=4):
         return False
     print("Обновляю Forebet (новый парсер)...")
     items = fetch_forebet()
     if items:
         forebet_cache = items
-        last_update = datetime.utcnow()
+        last_update = datetime.now(timezone.utc)
         print(f"Кеш Forebet обновлён: {len(items)} матчей (время {last_update})")
         return True
     else:
@@ -219,19 +220,18 @@ update_forebet_cache(force=True)
 
 while True:
     try:
-        if last_update is None or (datetime.utcnow() - last_update) >= timedelta(hours=4):
+        if last_update is None or (datetime.now(timezone.utc) - last_update) >= timedelta(hours=4):
             update_forebet_cache()
 
         zulubet_results = parse_zulubet()
         forebet_results = forebet_cache
 
-        # 🔹 фильтр по вероятности ≥ 60
         forebet_results_filtered = [
             f for f in forebet_results if f['p1'] >= 60 or f['px'] >= 60 or f['p2'] >= 60
         ]
 
-        print(f"Zulubet: найдено {len(zulubet_results)} подходящих матчей (по порогу).")
-        print(f"Forebet после фильтрации по вероятности ≥60: {len(forebet_results_filtered)} матчей")
+        print(f"Zulubet: найдено {len(zulubet_results)} матчей.")
+        print(f"Forebet после фильтрации ≥60: {len(forebet_results_filtered)} матчей")
 
         combined_matches = []
 
@@ -251,7 +251,7 @@ while True:
                     )
                 if f1_matches and f2_matches:
                     combined_matches.append("🔥 Полное совпадение по обеим командам!")
-                combined_matches.append("")  # разделитель между блоками
+                combined_matches.append("")
 
         if combined_matches:
             final_message = "\n".join(combined_matches)

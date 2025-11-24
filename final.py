@@ -9,8 +9,8 @@ from curl_cffi import requests as curl_requests  # Forebet parser
 # ===============================
 # 🔹 Настройки Telegram через ENV
 # ===============================
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TOKEN = "8353200396:AAEYPs8RmdEUfsK6lG1U3kve3fjL-oAIR3I"
+CHAT_ID = 293637253
 
 if not TOKEN or not CHAT_ID:
     raise ValueError("Пожалуйста, установите TELEGRAM_TOKEN и TELEGRAM_CHAT_ID")

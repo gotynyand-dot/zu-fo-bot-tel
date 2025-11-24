@@ -1,4 +1,11 @@
+# HTML парсер
 beautifulsoup4>=4.12
+
+# HTTP-запросы для Telegram
 requests>=2.31
+
+# Forebet API через curl_cffi (имитация браузера)
 curl-cffi==0.14.0b4
+
+# Парсер HTML с высокой скоростью для BeautifulSoup
 lxml>=4.9

@@ -1,4 +1,4 @@
 beautifulsoup4==4.12.2
 requests==2.31.0
-curl-cffi>=0.14.0
+curl-cffi==0.14.0b4
 lxml==4.9.3

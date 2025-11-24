@@ -15,8 +15,7 @@ def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {"chat_id": CHAT_ID, "text": text, "parse_mode": "HTML"}
     try:
-        response = rq.post(url, data=payload, timeout=30)
-        print("Telegram status:", response.status_code, response.text)
+        response = rq.post(url, data=payload, timeout=20)
         if not response.ok:
             print("Ошибка при отправке в Telegram:", response.text)
     except Exception as e:
@@ -26,6 +25,7 @@ def send_telegram_message(text):
 # 🔹 Вспомогательные функции
 # ===============================
 def normalize_team_name(name: str):
+    """Очищает название команды и убирает служебные слова"""
     name = re.sub(r'[^a-zA-Z0-9\s\-]', '', str(name)).lower()
     words = name.split()
     ignore = {
@@ -40,6 +40,7 @@ def normalize_team_name(name: str):
     return [w for w in words if w not in ignore and len(w) > 2]
 
 def teams_match(z_team: str, f_team: str) -> bool:
+    """Проверяет, есть ли совпадение по хотя бы одному слову"""
     z_words = normalize_team_name(z_team)
     f_words = normalize_team_name(f_team)
     return any(zw in f_words for zw in z_words)
@@ -49,7 +50,12 @@ def teams_match(z_team: str, f_team: str) -> bool:
 # ===============================
 def parse_zulubet():
     url = "https://www.zulubet.com/"
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/120.0.0.0 Safari/537.36",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
     try:
         response = rq.get(url, headers=headers, timeout=20)
         soup = BeautifulSoup(response.text, "html.parser")
@@ -85,8 +91,11 @@ def parse_zulubet():
             except:
                 time_str = raw_time
 
-            a_tag = cells[1].find("a")
-            match = a_tag.text.strip() if a_tag else "N/A"
+            match_tag = cells[1].find("a")
+            if not match_tag:
+                print("Ошибка в Zulubet: тег <a> не найден в строке")
+                continue
+            match = match_tag.text.strip()
 
             def extract_percent(text):
                 return int(text.split(":")[1].replace("%", "").strip())
@@ -128,18 +137,25 @@ def fetch_forebet():
 
     for desc, main_url in urls:
         try:
+            # HTML для предполагаемых счетов
             resp_main = session.get(main_url, impersonate="chrome110", timeout=20)
             resp_main.raise_for_status()
             soup = BeautifulSoup(resp_main.text, "html.parser")
 
+            # API
             api_url = "https://www.forebet.com/scripts/getrs.php"
+            date_str = (datetime.now() + timedelta(days=0 if desc == "today" else 1)).strftime("%Y-%m-%d")
 
-            if desc == "today":
-                date_str = datetime.now().strftime("%Y-%m-%d")
-            else:
-                date_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+            params = {
+                "ln": "en",
+                "tp": "1x2",
+                "in": date_str,
+                "ord": "0",
+                "tz": "+60",
+                "tzs": "0",
+                "tze": "0"
+            }
 
-            params = {"ln": "en", "tp": "1x2", "in": date_str, "ord": "0", "tz": "+60", "tzs": "0", "tze": "0"}
             resp_api = session.get(api_url, params=params, impersonate="chrome110", timeout=20)
             resp_api.raise_for_status()
             json_data = resp_api.json()
@@ -159,9 +175,12 @@ def fetch_forebet():
                 host = match.get("HOST_NAME", "Неизвестно")
                 guest = match.get("GUEST_NAME", "Неизвестно")
 
-                p1 = int(match.get("Pred_1", 0))
-                px = int(match.get("Pred_X", 0))
-                p2 = int(match.get("Pred_2", 0))
+                try:
+                    p1 = int(match.get("Pred_1", 0))
+                    px = int(match.get("Pred_X", 0))
+                    p2 = int(match.get("Pred_2", 0))
+                except:
+                    p1 = px = p2 = 0
 
                 forecast_score = score_divs[i].get_text(strip=True) if i < len(score_divs) else ""
 
@@ -202,12 +221,7 @@ def update_forebet_cache(force=False):
 # ===============================
 # 🔁 Основной цикл
 # ===============================
-
 print("Скрипт запущен. Forebet обновляется каждые 4 часа; сравнение — каждые 30 минут.\n")
-
-# 🔹 Тестовая проверка Telegram при старте
-send_telegram_message("✅ Скрипт успешно запущен на Render. Telegram работает!")
-
 update_forebet_cache(force=True)
 
 while True:
@@ -218,16 +232,24 @@ while True:
         zulubet_results = parse_zulubet()
         forebet_results = forebet_cache
 
+        # ===============================
+        # 🔹 DEBUG: вывод всех матчей для Render
+        # ===============================
+        print("===== DEBUG: Zulubet =====")
+        for z in zulubet_results:
+            print(f"{z['time']} | {z['home']} - {z['away']} | {z['text']}")
+
+        print("\n===== DEBUG: Forebet =====")
+        for f in forebet_results:
+            print(f"{f['time']} | {f['home']} vs {f['away']} | {f['p1']}-{f['px']}-{f['p2']} | {f['score']}")
+
         # 🔹 фильтр по вероятности ≥ 60
         forebet_results_filtered = [
             f for f in forebet_results if f['p1'] >= 60 or f['px'] >= 60 or f['p2'] >= 60
         ]
 
-        print(f"Zulubet: найдено {len(zulubet_results)} подходящих матчей (по порогу).")
+        print(f"\nZulubet: найдено {len(zulubet_results)} подходящих матчей (по порогу).")
         print(f"Forebet после фильтрации по вероятности ≥60: {len(forebet_results_filtered)} матчей")
-
-        # 🔹 Логирование команд для отладки
-        print("DEBUG: Zulubet команды:", [(z["home"], z["away"]) for z in zulubet_results])
 
         combined_matches = []
 

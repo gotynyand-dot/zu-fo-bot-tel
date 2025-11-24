@@ -3,7 +3,6 @@ import time
 from datetime import datetime, timedelta
 import requests as rq
 from bs4 import BeautifulSoup
-from curl_cffi import requests as curl_requests
 
 # ===============================
 # 🔹 Настройки Telegram
@@ -50,12 +49,7 @@ def teams_match(z_team: str, f_team: str) -> bool:
 # ===============================
 def parse_zulubet():
     url = "https://www.zulubet.com/"
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                      "AppleWebKit/537.36 (KHTML, like Gecko) "
-                      "Chrome/120.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
+    headers = {"User-Agent": "Mozilla/5.0"}
     try:
         response = rq.get(url, headers=headers, timeout=20)
         soup = BeautifulSoup(response.text, "html.parser")
@@ -91,11 +85,7 @@ def parse_zulubet():
             except:
                 time_str = raw_time
 
-            match_tag = cells[1].find("a")
-            if not match_tag:
-                print("Ошибка в Zulubet: тег <a> не найден в строке")
-                continue
-            match = match_tag.text.strip()
+            match = cells[1].find("a").text.strip()
 
             def extract_percent(text):
                 return int(text.split(":")[1].replace("%", "").strip())
@@ -123,6 +113,7 @@ def parse_zulubet():
 # ===============================
 # 🔹 Новый парсер Forebet (API + BeautifulSoup)
 # ===============================
+from curl_cffi import requests as curl_requests
 forebet_cache = []
 last_update = None
 
@@ -137,14 +128,18 @@ def fetch_forebet():
 
     for desc, main_url in urls:
         try:
-            # HTML для предполагаемых счетов
+            # Получаем HTML для предполагаемых счетов и коэффициентов
             resp_main = session.get(main_url, impersonate="chrome110", timeout=20)
             resp_main.raise_for_status()
             soup = BeautifulSoup(resp_main.text, "html.parser")
 
-            # API
+            # API URL
             api_url = "https://www.forebet.com/scripts/getrs.php"
-            date_str = (datetime.now() + timedelta(days=0 if desc == "today" else 1)).strftime("%Y-%m-%d")
+
+            if desc == "today":
+                date_str = datetime.now().strftime("%Y-%m-%d")
+            else:
+                date_str = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
             params = {
                 "ln": "en",
@@ -165,6 +160,7 @@ def fetch_forebet():
                 continue
 
             matches = json_data[0]
+
             score_divs = soup.find_all("div", class_="ex_sc tabonly")
 
             for i, match in enumerate(matches):
@@ -175,12 +171,9 @@ def fetch_forebet():
                 host = match.get("HOST_NAME", "Неизвестно")
                 guest = match.get("GUEST_NAME", "Неизвестно")
 
-                try:
-                    p1 = int(match.get("Pred_1", 0))
-                    px = int(match.get("Pred_X", 0))
-                    p2 = int(match.get("Pred_2", 0))
-                except:
-                    p1 = px = p2 = 0
+                p1 = int(match.get("Pred_1", 0))
+                px = int(match.get("Pred_X", 0))
+                p2 = int(match.get("Pred_2", 0))
 
                 forecast_score = score_divs[i].get_text(strip=True) if i < len(score_divs) else ""
 
@@ -232,23 +225,12 @@ while True:
         zulubet_results = parse_zulubet()
         forebet_results = forebet_cache
 
-        # ===============================
-        # 🔹 DEBUG: вывод всех матчей для Render
-        # ===============================
-        print("===== DEBUG: Zulubet =====")
-        for z in zulubet_results:
-            print(f"{z['time']} | {z['home']} - {z['away']} | {z['text']}")
-
-        print("\n===== DEBUG: Forebet =====")
-        for f in forebet_results:
-            print(f"{f['time']} | {f['home']} vs {f['away']} | {f['p1']}-{f['px']}-{f['p2']} | {f['score']}")
-
         # 🔹 фильтр по вероятности ≥ 60
         forebet_results_filtered = [
             f for f in forebet_results if f['p1'] >= 60 or f['px'] >= 60 or f['p2'] >= 60
         ]
 
-        print(f"\nZulubet: найдено {len(zulubet_results)} подходящих матчей (по порогу).")
+        print(f"Zulubet: найдено {len(zulubet_results)} подходящих матчей (по порогу).")
         print(f"Forebet после фильтрации по вероятности ≥60: {len(forebet_results_filtered)} матчей")
 
         combined_matches = []

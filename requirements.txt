@@ -1,11 +1,4 @@
-# HTML-парсер
-beautifulsoup4>=4.12
-
-# Для HTTP-запросов к Zulubet и Telegram
-requests>=2.31
-
-# Forebet API через curl_cffi (имитация браузера)
-curl-cffi==0.14.0b4
-
-# Парсер HTML для BeautifulSoup с высокой скоростью
-lxml>=4.9
+beautifulsoup4==4.12.2
+requests==2.31.0
+curl-cffi==2023.11.3
+lxml==4.9.3

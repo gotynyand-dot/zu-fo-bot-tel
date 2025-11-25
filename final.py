@@ -8,7 +8,6 @@ from curl_cffi import requests as curl_requests # Используется дл�
 # ===============================
 # 🔹 Настройки Telegram
 # ===============================
-# ВНИМАНИЕ: Замени эти значения на свои реальные.
 TOKEN = "8353200396:AAEYPs8RmdEUfsK6lG1U3kve3fjL-oAIR3I"
 CHAT_ID = 293637253
 
@@ -69,7 +68,6 @@ def parse_zulubet():
         print("Не удалось найти таблицу матчей на Zulubet.")
         return []
 
-    # Пропускаем заголовок и подзаголовок (первые 2 строки)
     rows = main_table.find_all("tr")[2:]
 
     for row in rows:
@@ -99,7 +97,6 @@ def parse_zulubet():
 
             # 3. Вероятности
             def extract_percent(text):
-                # Простая обработка: извлекаем число после двоеточия
                 return int(text.split(":")[1].replace("%", "").strip())
                 
             p1 = extract_percent(cells[3].text)
@@ -119,8 +116,7 @@ def parse_zulubet():
                 })
 
         except Exception as e:
-            # Печатаем ошибку, но продолжаем парсить следующие строки
-            # print(f"Ошибка при обработке строки Zulubet: {e}") 
+            print(f"Ошибка при обработке строки Zulubet: {e}") 
             continue
 
     return results
@@ -128,9 +124,6 @@ def parse_zulubet():
 # ===============================
 # 🔹 Парсер Forebet
 # ===============================
-# Кеш и время последнего обновления удалены, так как Cron Job запускается с нуля
-# и должен всегда получать актуальные данные.
-
 def fetch_forebet():
     """Парсит матчи Forebet за сегодня и завтра с использованием API и HTML."""
     results = []
@@ -152,7 +145,6 @@ def fetch_forebet():
             # 2. Получаем данные о матчах и процентах (API)
             api_url = "https://www.forebet.com/scripts/getrs.php"
             
-            # Используем datetime.now(UTC) для совместимости с Python 3.11+
             if desc == "today":
                 date_str = datetime.now(UTC).strftime("%Y-%m-%d")
             else:
@@ -206,61 +198,66 @@ def fetch_forebet():
     return results
 
 # ===============================
-# 🔁 Основная логика Cron Job
+# 🔁 Основной цикл Worker
 # ===============================
-def main():
-    """Основная функция для запуска скрипта как однократного задания."""
-    print("Скрипт запущен как Cron Job. Выполняется парсинг и сравнение.")
+print("Скрипт запущен в режиме Worker. Сравнение — каждые 30 минут.\n")
 
-    forebet_results = fetch_forebet()
-    zulubet_results = parse_zulubet()
+while True:
+    try:
+        # Каждый цикл мы заново получаем свежие данные
+        forebet_results = fetch_forebet()
+        zulubet_results = parse_zulubet()
 
-    # 🔹 Фильтр Forebet по вероятности ≥ 60
-    forebet_results_filtered = [
-        f for f in forebet_results if f['p1'] >= 60 or f['px'] >= 60 or f['p2'] >= 60
-    ]
-
-    print(f"\nZulubet: найдено {len(zulubet_results)} подходящих матчей (по порогу).")
-    print(f"Forebet после фильтрации по вероятности ≥60: {len(forebet_results_filtered)} матчей")
-
-    combined_matches = []
-    
-    # Сравнение
-    for z in zulubet_results:
-        # Ищем совпадения по командам
-        f_matches = [
-            f for f in forebet_results_filtered 
-            if teams_match(z["home"], f["home"]) or teams_match(z["away"], f["away"])
+        # 🔹 Фильтр Forebet по вероятности ≥ 60
+        forebet_results_filtered = [
+            f for f in forebet_results if f['p1'] >= 60 or f['px'] >= 60 or f['p2'] >= 60
         ]
+
+        print(f"\nZulubet: найдено {len(zulubet_results)} подходящих матчей (по порогу).")
+        print(f"Forebet после фильтрации по вероятности ≥60: {len(forebet_results_filtered)} матчей")
+
+        combined_matches = []
         
-        if f_matches:
-            # Заголовок блока с матчем Zulubet
-            z_text_html = f"<b>ZULUBET: {z['text']}</b>"
-            combined_matches.append(z_text_html)
+        # Сравнение
+        for z in zulubet_results:
+            # Ищем совпадения по командам
+            f_matches = [
+                f for f in forebet_results_filtered 
+                if teams_match(z["home"], f["home"]) or teams_match(z["away"], f["away"])
+            ]
             
-            # Добавляем все совпавшие матчи Forebet
-            for f in f_matches:
-                line = (
-                    f"FOR: {f['time']} {f['home']} vs {f['away']}  "
-                    f"P: {f['p1']}-{f['px']}-{f['p2']}  "
-                    f"Счет: {f['score']}"
-                )
-                # Дополнительная проверка на полное совпадение для выделения
-                is_full_match = teams_match(z["home"], f["home"]) and teams_match(z["away"], f["away"])
+            if f_matches:
+                # Заголовок блока с матчем Zulubet
+                z_text_html = f"<b>ZULUBET: {z['text']}</b>"
+                combined_matches.append(z_text_html)
                 
-                if is_full_match:
-                    combined_matches.append(f"🔥 {line}")
-                else:
-                    combined_matches.append(line)
-            
-            combined_matches.append("")  # разделитель между блоками
+                # Добавляем все совпавшие матчи Forebet
+                for f in f_matches:
+                    line = (
+                        f"FOR: {f['time']} {f['home']} vs {f['away']}  "
+                        f"P: {f['p1']}-{f['px']}-{f['p2']}  "
+                        f"Счет: {f['score']}"
+                    )
+                    # Проверка на полное совпадение для выделения
+                    is_full_match = teams_match(z["home"], f["home"]) and teams_match(z["away"], f["away"])
+                    
+                    if is_full_match:
+                        combined_matches.append(f"🔥 {line}")
+                    else:
+                        combined_matches.append(line)
+                
+                combined_matches.append("")  # разделитель между блоками
 
-    if combined_matches:
-        final_message = "\n".join(combined_matches)
-        send_telegram_message("🔔 Найдено совпадений! 🔔\n\n" + final_message)
-        print("✅ Совпадения найдены и отправлены.")
-    else:
-        print("— Совпадений нет.")
+        if combined_matches:
+            final_message = "\n".join(combined_matches)
+            send_telegram_message("🔔 Найдено совпадений! 🔔\n\n" + final_message)
+            print("✅ Совпадения найдены и отправлены.")
+        else:
+            print("— Совпадений нет.")
 
-if __name__ == "__main__":
-    main()
+    except Exception as e:
+        print(f"ОШИБКА В ОСНОВНОМ ЦИКЛЕ: {e}")
+
+    # Ждём 30 минут перед следующим циклом
+    print("\nОжидание 30 минут...\n")
+    time.sleep(1800)
